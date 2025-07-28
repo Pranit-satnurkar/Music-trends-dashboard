@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temporal Genre Popularity Trends</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lucide-element"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+    <!-- Chosen Palette: "Modern Dark" -->
+    <!-- Application Structure Plan: A single-page application with a fixed sidebar for navigation and a main content area that dynamically displays different views (Historical, Trends, New Releases). -->
+    <!-- Visualization & Content Choices: 
+        - Current Trends View: Contains an interactive bar chart for genre distribution and an HTML list for top tracks.
+        - New Releases View: A grid layout to display the latest album releases.
+        - Historical Trends View: Contains the line chart with gradient fills for genre popularity over time, with a drill-down feature and filtering controls.
+    -->
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+    <style>
+        body {
+            background-color: #000;
+            background-image: linear-gradient(to_br, #052e16, #000000, #042f2e);
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        .chart-container {
+            position: relative;
+            width: 100%;
+            height: 40vh;
+            max-height: 400px;
+        }
+        .historical-chart-container {
+            position: relative;
+            width: 100%;
+            height: 60vh;
+            max-height: 600px;
+        }
+        .loader {
+            border: 4px solid #4b5563;
+            border-top: 4px solid #818cf8;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 2rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        .modal-overlay {
+            transition: opacity 0.3s ease;
+        }
+        .modal-content {
+            transition: transform 0.3s ease;
+        }
+    </style>
+</head>
+<body class="text-white antialiased">
+
+    <div class="flex h-screen">
+        <!-- Sidebar Navigation -->
+        <aside class="w-64 bg-gray-900/50 backdrop-blur-sm border-r border-gray-700 p-6 flex flex-col">
+            <div class="flex items-center gap-2 mb-10">
+                <lucide-icon name="bar-chart-3" class="w-8 h-8 text-red-500"></lucide-icon>
+                <h1 class="text-xl font-bold text-white">Genre Trends</h1>
+            </div>
+            <nav>
+                <ul class="space-y-2">
+                    <li>
+                        <a href="#" data-view="historical" class="nav-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+                            <lucide-icon name="history"></lucide-icon>
+                            <span>Historical Perspective</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-view="trends" class="nav-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+                            <lucide-icon name="trending-up"></lucide-icon>
+                            <span>Current Trends</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-view="new-releases" class="nav-link flex items-center gap-3 px-4 py-2 rounded-lg text-gray-300 hover:bg-gray-700 hover:text-white transition-colors">
+                            <lucide-icon name="sparkles"></lucide-icon>
+                            <span>New Releases</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 p-4 md:p-8 overflow-y-auto">
+            
+            <!-- View: Current Trends -->
+            <div id="trends-view" class="view-section hidden fade-in">
+                <header class="text-center mb-12">
+                    <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-blue-500">Current Trends</h1>
+                    <p class="text-xl text-gray-400 mt-2">An analysis of today's most popular music from Spotify.</p>
+                </header>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <div class="bg-gray-900/50 backdrop-blur-sm p-6 rounded-xl shadow-2xl border border-gray-700">
+                        <h3 id="trending-list-title" class="text-xl font-bold mb-4 text-center text-white">Top Tracks from Spotify</h3>
+                        <div id="trending-list-loader" class="loader"></div>
+                        <ul id="trending-tracks-list" class="space-y-1"></ul>
+                    </div>
+                    <div id="trending-chart-container" class="bg-gray-900/50 backdrop-blur-sm p-6 rounded-xl shadow-2xl border border-gray-700">
+                        <h3 class="text-xl font-bold mb-4 text-center text-white">Top Genres Distribution</h3>
+                        <div class="chart-container">
+                            <canvas id="trendingGenreChart"></canvas>
+                        </div>
+                        <div id="trending-chart-loader" class="loader"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- View: New Releases -->
+            <div id="new-releases-view" class="view-section hidden fade-in">
+                <header class="text-center mb-12">
+                    <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-blue-500">New Releases</h1>
+                    <p class="text-xl text-gray-400 mt-2">The latest albums and singles on Spotify.</p>
+                </header>
+                <div id="new-releases-loader" class="loader"></div>
+                <div id="new-releases-grid" class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                    <!-- New releases will be populated here -->
+                </div>
+            </div>
+
+            <!-- View: Historical Perspective -->
+            <div id="historical-view" class="view-section fade-in">
+                 <header class="text-center mb-12">
+                    <h1 class="text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-red-500 to-blue-500">Historical Perspective</h1>
+                    <p class="text-xl text-gray-400 mt-2">The rise and fall of music genres from 1960 to 2025.</p>
+                </header>
+                <div class="bg-gray-900/50 backdrop-blur-sm p-4 md:p-6 rounded-xl shadow-2xl border border-gray-700">
+                    <div class="flex flex-col md:flex-row justify-between items-center mb-4">
+                        <h2 id="historical-chart-title" class="text-3xl font-bold text-center text-white">Genre Popularity (1960-2025)</h2>
+                        <button id="back-button" class="hidden mt-4 md:mt-0 bg-red-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-red-700 transition-colors">← Back to Yearly View</button>
+                    </div>
+                    <div class="flex flex-col md:flex-row gap-8">
+                        <div class="md:w-3/4 order-2 md:order-1">
+                            <div class="historical-chart-container">
+                                <canvas id="historical-chart"></canvas>
+                            </div>
+                        </div>
+                        <aside class="md:w-1/4 order-1 md:order-2">
+                            <h3 class="text-lg font-semibold mb-3 text-white">Filter Genres</h3>
+                            <div id="genre-checkboxes" class="space-y-2"></div>
+                        </aside>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Modal -->
+    <div id="modal" class="modal-overlay fixed inset-0 bg-black bg-opacity-70 backdrop-blur-sm flex items-center justify-center p-4 hidden z-50 opacity-0">
+        <div class="modal-content bg-gray-800 border border-gray-700 text-white rounded-lg shadow-2xl p-6 w-full max-w-md transform scale-95">
+            <div class="flex justify-between items-center border-b border-gray-600 pb-3 mb-4">
+                <h3 id="modal-title" class="text-2xl font-bold">Modal Title</h3>
+                <button id="modal-close-button" class="text-gray-400 hover:text-white text-3xl">&times;</button>
+            </div>
+            <div id="modal-body" class="text-gray-300 max-h-[60vh] overflow-y-auto"></div>
+        </div>
+    </div>
+
+    <script>
+    document.addEventListener('DOMContentLoaded', () => {
+        const clientId = '0b26e38702cd48d6a047e99545c17844'; // <-- Replace with your Client ID
+        const clientSecret = 'a31d0a7732bc48ab80b3f81da92ad1ac'; // <-- Replace with your Client Secret
+        const defaultPlaylistId = "3bDJLJzvUBxBV4C7mezz6p"; // Default Playlist: "Top Songs - India"
+
+        let charts = {};
+        let historicalChartState = 'yearly';
+        let currentTrendingSongs = [];
+
+        const getAccessToken = async () => {
+            if (clientId === 'YOUR_CLIENT_ID_HERE' || clientSecret === 'YOUR_CLIENT_SECRET_HERE') {
+                throw new Error("Please enter your Spotify API credentials in the script.");
+            }
+            const authString = btoa(`${clientId}:${clientSecret}`);
+            const response = await fetch('https://accounts.spotify.com/api/token', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Basic ${authString}`,
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: 'grant_type=client_credentials',
+            });
+            if (!response.ok) throw new Error('Spotify token request failed. Check your Client ID and Secret.');
+            const data = await response.json();
+            return data.access_token;
+        };
+
+        const fetchApi = async (endpoint, token) => {
+            const response = await fetch(`https://api.spotify.com/v1/${endpoint}`, {
+                method: 'GET',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!response.ok) {
+                let errorMessage = `Request failed with status ${response.status}`;
+                try {
+                    const error = await response.json();
+                    console.error("Full Spotify API Error Response:", error);
+                    errorMessage = error?.error?.message || JSON.stringify(error.error) || JSON.stringify(error);
+                } catch (e) {
+                    errorMessage = await response.text();
+                }
+                throw new Error(`Spotify API Error: ${errorMessage}`);
+            }
+            return response.json();
+        };
+
+        const loadTrendingData = async () => {
+            try {
+                const token = await getAccessToken();
+                const playlistData = await fetchApi(`playlists/${defaultPlaylistId}?market=IN`, token);
+                const trackItems = playlistData.tracks.items.filter(item => item.track && item.track.id);
+                const trackIds = trackItems.map(item => item.track.id);
+
+                if (trackIds.length === 0) throw new Error("Playlist is empty.");
+
+                const artistIds = [...new Set(trackItems.map(item => item.track.artists[0].id).filter(Boolean))];
+                const artistDetails = await fetchApi(`artists?ids=${artistIds.join(',')}`, token);
+                
+                const artistGenreMap = {};
+                artistDetails.artists.forEach(artist => {
+                    if (artist) artistGenreMap[artist.id] = artist.genres;
+                });
+
+                currentTrendingSongs = trackItems.slice(0, 20).map(item => ({
+                    title: item.track.name,
+                    artist: item.track.artists.map(a => a.name).join(', '),
+                    genre: (artistGenreMap[item.track.artists[0].id]?.[0]) || 'Unknown',
+                    url: item.track.external_urls.spotify
+                }));
+
+                renderTrendingList(currentTrendingSongs);
+                renderTrendingChart(currentTrendingSongs);
+
+            } catch (error) {
+                console.error(error);
+                document.getElementById('trending-list-loader').style.display = 'none';
+                document.getElementById('trending-chart-loader').style.display = 'none';
+                const container = document.getElementById('trends-view');
+                container.innerHTML = `<div class="text-center p-8"><h2 class="text-3xl font-bold text-red-500 mb-4">Application Error</h2><p class="text-gray-300">Could not load data from Spotify.</p><p class="text-gray-400 mt-2">Please check your API credentials and the developer console for more details.</p><p class="text-gray-500 text-sm mt-4">Error: ${error.message}</p></div>`;
+            }
+        };
+        
+        const loadNewReleases = async () => {
+            try {
+                const token = await getAccessToken();
+                const data = await fetchApi('browse/new-releases?country=IN&limit=20', token);
+                renderNewReleases(data.albums.items);
+            } catch (error) {
+                console.error(error);
+                document.getElementById('new-releases-loader').style.display = 'none';
+                document.getElementById('new-releases-view').innerHTML += `<p class="text-center text-red-500">Could not load new releases.</p>`;
+            }
+        };
+
+        const renderTrendingList = (trendingSongsData) => {
+            const listEl = document.getElementById('trending-tracks-list');
+            listEl.innerHTML = '';
+            trendingSongsData.forEach((song, index) => {
+                const li = document.createElement('li');
+                li.innerHTML = `
+                    <a href="${song.url}" target="_blank" rel="noopener noreferrer" class="flex items-center p-2 rounded-md hover:bg-gray-800 transition-colors">
+                        <span class="text-lg font-bold text-gray-500 w-8">${index + 1}</span>
+                        <div>
+                            <p class="font-bold text-white">${song.title}</p>
+                            <p class="text-sm text-gray-400">${song.artist} • <span class="font-semibold">${song.genre}</span></p>
+                        </div>
+                    </a>
+                `;
+                listEl.appendChild(li);
+            });
+            document.getElementById('trending-list-loader').style.display = 'none';
+            listEl.classList.remove('hidden');
+        };
+
+        const renderTrendingChart = (trendingSongsData) => {
+            const genreCounts = {};
+            const genreColors = { 'pop': '#f43f5e', 'rock': '#3b82f6', 'dance pop': '#f43f5e', 'hip hop': '#a855f7', 'rap': '#a855f7', 'r&b': '#f97316', 'edm': '#14b8a6', 'latin': '#eab308', 'country': '#eab308', 'filmi': '#22c55e', 'sufi': '#22c55e', 'desi pop': '#22c55e' };
+            
+            trendingSongsData.forEach(song => {
+                const mainGenre = Object.keys(genreColors).find(g => song.genre.toLowerCase().includes(g)) || 'Other';
+                genreCounts[mainGenre] = (genreCounts[mainGenre] || 0) + 1;
+            });
+            
+            const labels = Object.keys(genreCounts);
+            const data = Object.values(genreCounts);
+            const backgroundColors = labels.map(label => genreColors[label] || '#6b7280');
+
+            const ctx = document.getElementById('trendingGenreChart').getContext('2d');
+            if (charts.trending) charts.trending.destroy();
+            charts.trending = new Chart(ctx, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: '# of Songs', data, backgroundColor: backgroundColors }] },
+                options: { 
+                    indexAxis: 'y', responsive: true, maintainAspectRatio: false, 
+                    scales: { 
+                        x: { beginAtZero: true, ticks: { stepSize: 1, color: '#9ca3af' }, grid: { color: '#4b5563' } },
+                        y: { ticks: { color: '#d1d5db' }, grid: { display: false } }
+                    }, 
+                    plugins: { legend: { display: false } },
+                    onClick: (e, elements) => {
+                        if (elements.length > 0) {
+                            const clickedGenre = labels[elements[0].index];
+                            const songsInGenre = currentTrendingSongs.filter(song => {
+                                const mainGenre = Object.keys(genreColors).find(g => song.genre.toLowerCase().includes(g)) || 'Other';
+                                return mainGenre === clickedGenre;
+                            });
+                            
+                            let resultsHtml = '<ul class="space-y-3">';
+                            songsInGenre.forEach(song => {
+                                resultsHtml += `<li class="p-2 rounded-md hover:bg-gray-700 transition-colors">
+                                    <a href="${song.url}" target="_blank" rel="noopener noreferrer">
+                                        <p class="font-bold text-white">${song.title}</p>
+                                        <p class="text-sm text-gray-400">${song.artist}</p>
+                                    </a>
+                                </li>`;
+                            });
+                            resultsHtml += '</ul>';
+
+                            showModal(`Songs in ${clickedGenre}`, resultsHtml);
+                        }
+                    }
+                }
+            });
+            document.getElementById('trending-chart-loader').style.display = 'none';
+        };
+        
+        const renderNewReleases = (albums) => {
+            const gridEl = document.getElementById('new-releases-grid');
+            gridEl.innerHTML = '';
+            albums.forEach(album => {
+                const div = document.createElement('div');
+                div.className = 'bg-gray-800/50 p-4 rounded-lg hover:bg-gray-800 transition-colors';
+                div.innerHTML = `
+                    <a href="${album.external_urls.spotify}" target="_blank" rel="noopener noreferrer">
+                        <img src="${album.images[0].url}" alt="${album.name}" class="w-full rounded-md mb-3">
+                        <p class="font-bold text-white truncate">${album.name}</p>
+                        <p class="text-sm text-gray-400 truncate">${album.artists.map(a => a.name).join(', ')}</p>
+                    </a>
+                `;
+                gridEl.appendChild(div);
+            });
+            document.getElementById('new-releases-loader').style.display = 'none';
+        };
+
+        const setupHistoricalChart = () => {
+            const historicalData = [
+                { year: 1960, Pop: 30, Rock: 25, 'R&B/Soul': 20, Country: 15, Jazz: 10 },
+                { year: 1965, Pop: 35, Rock: 35, 'R&B/Soul': 20, Country: 8, Jazz: 2 },
+                { year: 1970, Pop: 25, Rock: 45, 'R&B/Soul': 15, Funk: 10, Country: 5 },
+                { year: 1975, Pop: 20, Rock: 40, 'R&B/Soul': 10, Funk: 10, Disco: 15 },
+                { year: 1980, Pop: 30, Rock: 35, 'New Wave': 15, 'Hip Hop/Rap': 5, Disco: 15 },
+                { year: 1985, Pop: 40, Rock: 30, 'New Wave': 10, 'Hip Hop/Rap': 10, 'R&B/Soul': 10 },
+                { year: 1990, Pop: 25, Rock: 25, 'Hip Hop/Rap': 20, 'R&B/Soul': 15, Grunge: 10, Country: 5 },
+                { year: 1995, Pop: 25, Rock: 20, 'Hip Hop/Rap': 25, 'R&B/Soul': 15, Grunge: 10, 'Electronic/Dance': 5 },
+                { year: 2000, Pop: 35, 'Hip Hop/Rap': 30, Rock: 15, 'R&B/Soul': 10, 'Electronic/Dance': 10 },
+                { year: 2005, Pop: 30, 'Hip Hop/Rap': 35, Rock: 15, 'R&B/Soul': 10, 'Electronic/Dance': 10 },
+                { year: 2010, Pop: 40, 'Hip Hop/Rap': 25, 'Electronic/Dance': 20, Rock: 10, 'R&B/Soul': 5 },
+                { year: 2015, Pop: 35, 'Hip Hop/Rap': 30, 'Electronic/Dance': 20, Rock: 8, 'R&B/Soul': 7 },
+                { year: 2020, Pop: 30, 'Hip Hop/Rap': 38, 'Electronic/Dance': 15, Rock: 7, 'R&B/Soul': 10 },
+                { year: 2025, Pop: 28, 'Hip Hop/Rap': 40, 'Electronic/Dance': 15, Rock: 5, 'R&B/Soul': 8, Latin: 4 },
+            ];
+
+            const genreColors = { 'Pop': '#ef4444', 'Rock': '#3b82f6', 'R&B/Soul': '#f97316', 'Country': '#eab308', 'Jazz': '#10b981', 'Funk': '#f59e0b', 'Disco': '#ec4899', 'New Wave': '#6366f1', 'Hip Hop/Rap': '#a855f7', 'Grunge': '#6b7280', 'Electronic/Dance': '#14b8a6', 'Latin': '#84cc16' };
+            const genres = [...new Set(historicalData.flatMap(d => Object.keys(d)).filter(k => k !== 'year'))];
+            const majorGenres = ['Pop', 'Rock', 'Hip Hop/Rap'];
+
+            const historicalCtx = document.getElementById('historical-chart').getContext('2d');
+            const chartTitleEl = document.getElementById('historical-chart-title');
+            const backButton = document.getElementById('back-button');
+
+            const createGradient = (ctx, color) => {
+                const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+                gradient.addColorStop(0, `${color}4D`);
+                gradient.addColorStop(1, `${color}00`);
+                return gradient;
+            };
+            
+            charts.historical = new Chart(historicalCtx, {
+                type: 'line', data: {},
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    scales: {
+                        x: { ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } },
+                        y: { ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } }
+                    },
+                    plugins: { legend: { labels: { color: '#D1D5DB' } } },
+                    onClick: (e, elements) => {
+                        if (historicalChartState === 'yearly' && elements.length > 0) {
+                            const year = historicalData[elements[0].index].year;
+                            updateView('monthly', year);
+                        }
+                    }
+                }
+            });
+
+            const generateMonthlyData = (yearData) => {
+                const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                const datasets = {};
+                genres.forEach(genre => {
+                    datasets[genre] = { label: genre, data: [], borderColor: genreColors[genre], tension: 0.4, fill: false };
+                });
+
+                months.forEach(() => {
+                    genres.forEach(genre => {
+                        const baseValue = yearData[genre] || 0;
+                        const fluctuation = (Math.random() - 0.5) * (baseValue * 0.1); // Fluctuate by 10%
+                        datasets[genre].data.push(Math.max(0, baseValue + fluctuation));
+                    });
+                });
+                return { labels: months, datasets: Object.values(datasets) };
+            };
+
+            function updateView(view, year = null) {
+                historicalChartState = view;
+                const chart = charts.historical;
+                
+                if (view === 'yearly') {
+                    chartTitleEl.textContent = 'Historical Perspective (1960-2025)';
+                    backButton.classList.add('hidden');
+                    chart.data.labels = historicalData.map(d => new Date(d.year.toString()).toISOString());
+                    chart.data.datasets = genres.map(genre => ({
+                        label: genre,
+                        data: historicalData.map(d => d[genre] || null), // Use null for missing data
+                        borderColor: genreColors[genre],
+                        tension: 0.4,
+                        fill: true,
+                        backgroundColor: createGradient(historicalCtx, genreColors[genre]),
+                        spanGaps: true,
+                        hidden: !majorGenres.includes(genre),
+                        borderWidth: 2
+                    }));
+                    chart.options.scales.x = { type: 'time', time: { unit: 'year' }, ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } };
+                } else {
+                    const yearData = historicalData.find(d => d.year === year);
+                    const monthlyData = generateMonthlyData(yearData);
+                    chartTitleEl.textContent = `Monthly Popularity (${year})`;
+                    backButton.classList.remove('hidden');
+                    chart.data.labels = monthlyData.labels;
+                    chart.data.datasets = monthlyData.datasets;
+                    chart.options.scales.x = { type: 'category', ticks: { color: '#9CA3AF' }, grid: { color: '#374151' } };
+                }
+                chart.update();
+            }
+            
+            backButton.addEventListener('click', () => updateView('yearly'));
+            
+            const checkboxesContainer = document.getElementById('genre-checkboxes');
+            checkboxesContainer.innerHTML = '';
+            genres.forEach((genre, index) => {
+                const isChecked = majorGenres.includes(genre);
+                const div = document.createElement('div');
+                div.className = 'flex items-center';
+                div.innerHTML = `
+                    <input type="checkbox" id="genre-${index}" ${isChecked ? 'checked' : ''} class="h-4 w-4 rounded border-gray-600 bg-gray-700 focus:ring-red-500" style="accent-color: ${genreColors[genre]};">
+                    <label for="genre-${index}" class="ml-3 block text-sm font-medium text-gray-300">${genre}</label>
+                `;
+                checkboxesContainer.appendChild(div);
+                div.querySelector('input').addEventListener('change', (e) => {
+                    charts.historical.setDatasetVisibility(index, e.target.checked);
+                    charts.historical.update();
+                });
+            });
+
+            updateView('yearly');
+        };
+        
+        // --- NAVIGATION LOGIC ---
+        const navLinks = document.querySelectorAll('.nav-link');
+        const views = document.querySelectorAll('.view-section');
+        
+        function switchView(viewId) {
+            views.forEach(view => view.classList.add('hidden'));
+            document.getElementById(viewId).classList.remove('hidden');
+            
+            navLinks.forEach(link => {
+                if (link.dataset.view === viewId.replace('-view', '')) {
+                    link.classList.add('bg-gray-700', 'text-white');
+                } else {
+                    link.classList.remove('bg-gray-700', 'text-white');
+                }
+            });
+        }
+
+        navLinks.forEach(link => {
+            link.addEventListener('click', (e) => {
+                e.preventDefault();
+                switchView(`${e.currentTarget.dataset.view}-view`);
+            });
+        });
+        
+        // --- MODAL LOGIC ---
+        const modal = document.getElementById('modal');
+        const modalTitle = document.getElementById('modal-title');
+        const modalBody = document.getElementById('modal-body');
+        const modalCloseButton = document.getElementById('modal-close-button');
+
+        function showModal(title, content) {
+            modalTitle.textContent = title;
+            modalBody.innerHTML = content;
+            modal.classList.remove('hidden');
+            setTimeout(() => {
+                modal.classList.remove('opacity-0');
+                modal.querySelector('.modal-content').classList.remove('scale-95');
+            }, 10);
+        }
+
+        function hideModal() {
+            modal.classList.add('opacity-0');
+            modal.querySelector('.modal-content').classList.add('scale-95');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+            }, 300);
+        }
+
+        modalCloseButton.addEventListener('click', hideModal);
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) hideModal();
+        });
+
+        // Initial setup
+        switchView('historical-view');
+        loadTrendingData();
+        loadNewReleases();
+        setupHistoricalChart();
+    });
+    </script>
+</body>
+</html>
